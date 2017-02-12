@@ -1,0 +1,25 @@
+{
+    "name": "maxgu/anagit",
+    "description": "Git repository analyze tool",
+    "type": "library",
+    "license": "BSD-3-Clause",
+    "keywords": [ "git analyze tool", "tool" ],
+    "homepage": "https://github.com/maxgu/anagit",
+    "require": {
+        "php": ">=5.6.0",
+        "zfcampus/zf-console": "^1.3",
+        "zendframework/zend-servicemanager": "^3.1",
+        "zelenin/zend-expressive-config": "~1.2.0",
+        "symfony/process": "^3.2"
+    },
+    "require-dev" : {
+        "phpunit/phpunit": "~5.0"
+    },
+    "autoload": {
+        "psr-4": { "Anagit\\": "src/" }
+    },
+    "autoload-dev": {
+        "psr-4": { "AnagitTest\\": "tests/" }
+    },
+    "bin": ["bin/anagit"]
+}
