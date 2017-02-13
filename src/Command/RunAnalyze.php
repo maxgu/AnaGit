@@ -11,6 +11,7 @@ use Anagit\Domain\Model\Commit;
 class RunAnalyze
 {
     const COMMIT_PART_SIZE = 100;
+    const RESULT_COUNT = 50;
 
     public function __invoke(Route $route, AdapterInterface $console)
     {
@@ -24,31 +25,48 @@ class RunAnalyze
             return;
         }
 
+        if (!is_dir('/tmp/anagit')) {
+            mkdir('/tmp/anagit');
+            mkdir('/tmp/anagit/data');
+            mkdir('/tmp/anagit/data/cache');
+            mkdir('/tmp/anagit/data/cache/top10-changed-files');
+        }
+
         $this->viewCommitsCount($console);
 
         $console->writeLine("");
 
         $commits = [];
 
-        $console->write("Getting commit info");
-        for ($i = 0; $i < 100; $i++) {
-            $commitsPart = $this->getCommits($i);
-
-            $commits = array_merge($commits, $commitsPart);
-            $console->write(".");
-
-            if (count($commitsPart) < self::COMMIT_PART_SIZE) {
-                break;
-            }
+        if (file_exists('/tmp/anagit/data/cache/commits.php')) {
+            $commits = unserialize(file_get_contents('/tmp/anagit/data/cache/commits.php'));
         }
+
+        $console->write("Getting commit info");
+
+        if (empty($commits)) {
+            for ($i = 0; $i < 1000; $i++) {
+                $commitsPart = $this->getCommits($i);
+
+                $commits = array_merge($commits, $commitsPart);
+                $console->write(".");
+
+                if (count($commitsPart) < self::COMMIT_PART_SIZE) {
+                    break;
+                }
+            }
+
+            file_put_contents('/tmp/anagit/data/cache/commits.php', serialize($commits));
+        }
+
         $console->writeLine("");
 
-        $console->write("Calculate top 10 changed files");
+        $console->write("Calculate top ".self::RESULT_COUNT." changed files");
         $this->viewTop10ChangedFiles($console, $commits);
 
         $console->writeLine("");
 
-        $console->write("Calculate top 10 commiters");
+        $console->write("Calculate top ".self::RESULT_COUNT." commiters");
         $this->viewTop10Commiters($console, $commits);
 
     }
@@ -100,16 +118,31 @@ class RunAnalyze
         $statistic = [];
         /** @var Commit $commit */
         foreach ($commits as $i => $commit) {
-            $changedFilesCommand = new Process(
-                "git diff-tree --no-commit-id --name-only -r " . $commit->getHash()
-            );
-            $changedFilesCommand->run();
+            $isCached = false;
+            if (file_exists('/tmp/anagit/data/cache/top10-changed-files/' . $this->generatePath($commit->getHash()) . $commit->getHash() . '.php')) {
+                $files = unserialize(file_get_contents('/tmp/anagit/data/cache/top10-changed-files/' . $this->generatePath($commit->getHash()) . $commit->getHash() . '.php'));
+                $isCached = true;
+            } else {
+                $changedFilesCommand = new Process(
+                    "git diff-tree --no-commit-id --name-only -r " . $commit->getHash()
+                );
+                $changedFilesCommand->run();
 
-            $filesOutput = $changedFilesCommand->getOutput();
-            $files = explode(PHP_EOL, $filesOutput);
+                $filesOutput = $changedFilesCommand->getOutput();
+                $files = explode(PHP_EOL, $filesOutput);
+            }
 
             foreach ($files as $filePath) {
                 if (empty($filePath)) {
+                    continue;
+                }
+
+                $pathParts = pathinfo($filePath);
+                if (!isset($pathParts['extension'])) {
+                    continue;
+                }
+
+                if (in_array($pathParts['extension'], ['css', 'js'])) {
                     continue;
                 }
 
@@ -123,12 +156,36 @@ class RunAnalyze
             if ($i%100 == 0) {
                 $console->write(".");
             }
+
+            if (!$isCached) {
+                if (!is_dir('/tmp/anagit/data/cache/top10-changed-files/' . $this->generatePath($commit->getHash()))) {
+                    mkdir('/tmp/anagit/data/cache/top10-changed-files/' . $this->generatePath($commit->getHash()), 0755, true);
+                }
+
+                file_put_contents(
+                    '/tmp/anagit/data/cache/top10-changed-files/' . $this->generatePath($commit->getHash()) . $commit->getHash() . '.php',
+                    serialize($files)
+                );
+            }
         }
 
         $console->writeLine("");
-        $console->writeLine("Top 10 changed files:");
+        $console->writeLine("Top ".self::RESULT_COUNT." changed files:");
 
         $this->showStatistic($console, $statistic);
+    }
+
+    private function generatePath($objectId, $step = 2)
+    {
+        if (empty($objectId)) {
+            throw new \InvalidArgumentException('$objectID can not be empty');
+        }
+        // prepare path "/2f/c2/9a"
+        $path = '';
+        for ($i = 0; $i < (strlen($objectId) - $step); $i += $step) {
+            $path .= substr($objectId, $i, $step) . DIRECTORY_SEPARATOR;
+        }
+        return $path;
     }
 
     private function viewTop10Commiters($console, $commits)
@@ -145,12 +202,10 @@ class RunAnalyze
             if ($i%100 == 0) {
                 $console->write(".");
             }
-
-            if ($i == 500) break;
         }
 
         $console->writeLine("");
-        $console->writeLine("Top 10 commiters:");
+        $console->writeLine("Top ".self::RESULT_COUNT." commiters:");
 
         $this->showStatistic($console, $statistic);
     }
@@ -159,7 +214,7 @@ class RunAnalyze
     {
         arsort($statistic);
 
-        foreach(array_slice($statistic, 0, 10) as $filePath => $changedTimes) {
+        foreach(array_slice($statistic, 0, self::RESULT_COUNT) as $filePath => $changedTimes) {
             $console->writeLine(sprintf("  [%4s] %s", $changedTimes, $filePath), ColorInterface::GREEN);
         }
     }

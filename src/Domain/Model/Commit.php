@@ -56,4 +56,10 @@ class Commit
     {
         return $this->date;
     }
+
+    public function __sleep()
+    {
+        return array('hash', 'author', 'date');
+    }
+
 }
